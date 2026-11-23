@@ -69,6 +69,7 @@ dialog::backdrop{background:rgba(20,32,27,.5)}
 .codeRow{display:flex;gap:8px}.codeRow .in{flex:1}.codeRow .btn2{min-height:48px;white-space:nowrap}
   .codeScanner{position:relative;width:100%;height:260px;border-radius:12px;background:#14201B;overflow:hidden}
   .codeScanner video{width:100%;height:100%;object-fit:cover}.codeScanner .scanFrame{position:absolute;left:12%;right:12%;top:28%;bottom:28%;border:3px solid #5FD3B0;border-radius:10px}
+.filters{display:grid;grid-template-columns:1fr 1fr;gap:8px}.filters .in{height:44px}.saleLine{border-top:1px solid var(--line);margin-top:8px;padding-top:8px}.saleActions{display:flex;gap:6px}.saleItem{display:flex;justify-content:space-between;gap:8px;font-size:13px;margin-top:4px}
 </style>
 </head>
 <body>
@@ -131,8 +132,23 @@ dialog::backdrop{background:rgba(20,32,27,.5)}
   </div>
 </section>
 
+<!-- SALES -->
+<section id="t-sales" class="tab">
+  <header class="top"><div><h1>Sales</h1><div class="sub">Transactions with date and time</div></div></header>
+  <div class="body">
+    <div class="filters">
+      <input class="in" id="salesDate" type="date" aria-label="Choose sales date">
+      <select class="in" id="salesMonth" aria-label="Choose sales month"><option value="">All months</option></select>
+    </div>
+    <div class="saleActions"><button class="btn2" type="button" id="salesToday">Today</button><button class="btn2" type="button" id="salesAll">View all</button></div>
+    <div class="stats"><div class="card"><div class="sub">Sales</div><b id="salesCount">0</b></div><div class="card"><div class="sub">Revenue</div><b id="salesRevenue">₱0.00</b></div></div>
+    <div class="card"><b>Items sold</b><div id="salesItems"></div></div>
+    <div id="salesList" style="display:flex;flex-direction:column;gap:8px"></div>
+  </div>
+</section>
+
 <nav class="nav" aria-label="Main">
-  <button data-tab="sell" class="on">Sell</button><button data-tab="items">Items</button><button data-tab="stock">Stock</button>
+  <button data-tab="sell" class="on">Sell</button><button data-tab="items">Items</button><button data-tab="stock">Stock</button><button data-tab="sales">Sales</button>
 </nav>
 </div>
 
@@ -187,7 +203,18 @@ let paid = 0;
 let lastTagTimer;
 let itemFilter = 'all';
 
-const find = code => items.find(i => i.code === String(code).trim());
+const normalizeCode = code => String(code).trim().replace(/\s+/g,'').replace(/^\D*(\d+)\D*$/, '$1');
+const find = code => {
+  const raw = String(code).trim();
+  const key = normalizeCode(raw);
+  return items.find(i => String(i.code).trim() === raw)
+    || items.find(i => normalizeCode(i.code) === key)
+    || items.find(i => {
+      const itemKey = normalizeCode(i.code);
+      return /^\d+$/.test(key) && /^\d+$/.test(itemKey)
+        && (itemKey.endsWith(key) || key.endsWith(itemKey));
+    });
+};
 const total = () => cart.reduce((s, l) => s + find(l.code).price * l.qty, 0);
 const qtyCount = () => cart.reduce((s, l) => s + l.qty, 0);
 
@@ -253,32 +280,60 @@ $('#charge').addEventListener('click', () => {
   if (!cart.length) return toast('Scan an item first');
   if (paid < t) return toast('Customer pays less than the total');
   cart.forEach(l => { find(l.code).stock -= l.qty; });
-  sales.push({at: new Date().toISOString(), total: t, paid, lines: cart.map(l => ({...l, price: find(l.code).price}))});
+  sales.push({at: new Date().toISOString(), total: t, paid, lines: cart.map(l => {
+    const it = find(l.code);
+    return {code: l.code, name: it.name, qty: l.qty, price: it.price};
+  })});
   save();
   const ch = paid - t;
   toast('Sale saved. Change ' + peso(ch));
   cart = []; paid = 0; $('#paid').value = '';
-  renderCart(); renderItems(); renderStock();
+  renderCart(); renderItems(); renderStock(); renderSales();
 });
 
 /* ---------- camera scanning (phone camera only) ---------- */
 let stream, scanning = false, lastCode = '', lastAt = 0, detector, jsQR;
+let sellZxingReader = null;
 async function startCam() {
   try {
     stream = await navigator.mediaDevices.getUserMedia({video: {facingMode: {ideal: 'environment'}}, audio: false});
   } catch { return toast('Camera blocked. Allow camera access and open this page over https.'); }
   const v = $('#v'); v.srcObject = stream; await v.play();
   $('#camBtn').hidden = true; $('#hint').textContent = 'Camera ready · barcode or QR';
-  if ('BarcodeDetector' in window) detector = new BarcodeDetector();
-  else await new Promise(r => { const s = document.createElement('script');
-    s.src = 'https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js'; s.onload = () => { jsQR = window.jsQR; r(); }; s.onerror = r; document.head.append(s); });
+
+  if ('BarcodeDetector' in window) {
+    try { detector = new BarcodeDetector(); } catch { detector = null; }
+  }
+  if (!detector) {
+    await new Promise(r => { const s = document.createElement('script'); s.src = 'https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js'; s.onload = r; s.onerror = r; document.head.append(s); });
+    jsQR = window.jsQR || null;
+    await new Promise(r => { const s = document.createElement('script'); s.src = 'https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js'; s.onload = r; s.onerror = r; document.head.append(s); });
+  }
+
+  scanning = true;
+  if (!detector && window.ZXing && window.ZXing.BrowserMultiFormatReader) {
+    try {
+      sellZxingReader = new window.ZXing.BrowserMultiFormatReader();
+      sellZxingReader.decodeFromVideoElement(v, (result) => {
+        if (result) acceptScannedCode(result.getText());
+      });
+      return;
+    } catch { sellZxingReader = null; }
+  }
   if (!detector && !jsQR) toast('This browser cannot read codes. Use Type name / SKU.');
-  scanning = true; loop();
+  loop();
 }
 function stopCam() {
   scanning = false;
+  if (sellZxingReader) { try { sellZxingReader.reset(); } catch {} sellZxingReader = null; }
   if (stream) stream.getTracks().forEach(t => t.stop());
   stream = null; $('#v').srcObject = null; $('#camBtn').hidden = false; $('#hint').textContent = 'Scan items, they add automatically';
+}
+function acceptScannedCode(value) {
+  const now = Date.now();
+  if (value && (String(value) !== lastCode || now - lastAt > 1800)) {
+    lastCode = String(value); lastAt = now; add(lastCode);
+  }
 }
 async function loop() {
   if (!scanning) return;
@@ -291,8 +346,7 @@ async function loop() {
       const x = c.getContext('2d', {willReadFrequently: true}); x.drawImage(v, 0, 0);
       const d = x.getImageData(0, 0, c.width, c.height), q = jsQR(d.data, d.width, d.height); if (q) value = q.data;
     }
-    const now = Date.now();
-    if (value && (value !== lastCode || now - lastAt > 1800)) { lastCode = value; lastAt = now; add(value); }
+    if (value) acceptScannedCode(value);
   } catch {}
   setTimeout(() => requestAnimationFrame(loop), 200);
 }
@@ -368,54 +422,99 @@ $('#slist').addEventListener('click', e => {
   if (n > 0) { find(b.dataset.stock).stock += n; save(); renderStock(); renderItems(); toast('Stock updated'); }
 });
 
+/* ---------- sales tab ---------- */
+function localDateKey(iso) {
+  const d = new Date(iso);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return y + '-' + m + '-' + day;
+}
+function monthKey(iso) { return localDateKey(iso).slice(0, 7); }
+function populateSalesMonths() {
+  const select = $('#salesMonth');
+  const previous = select.value;
+  const months = [...new Set(sales.map(s => monthKey(s.at)))].sort().reverse();
+  select.innerHTML = '<option value="">All months</option>' + months.map(m => `<option value="${m}">${new Date(m + '-01T12:00:00').toLocaleDateString(undefined, {month:'long', year:'numeric'})}</option>`).join('');
+  if (months.includes(previous)) select.value = previous;
+}
+function renderSales() {
+  populateSalesMonths();
+  const day = $('#salesDate').value;
+  const month = $('#salesMonth').value;
+  const filtered = sales.filter(s => (!day || localDateKey(s.at) === day) && (!month || monthKey(s.at) === month));
+  const revenue = filtered.reduce((sum, s) => sum + Number(s.total || 0), 0);
+  $('#salesCount').textContent = filtered.length;
+  $('#salesRevenue').textContent = peso(revenue);
+
+  const itemTotals = {};
+  filtered.forEach(s => s.lines.forEach(l => {
+    const name = l.name || (find(l.code) ? find(l.code).name : l.code);
+    if (!itemTotals[name]) itemTotals[name] = {qty: 0, amount: 0};
+    itemTotals[name].qty += Number(l.qty || 0);
+    itemTotals[name].amount += Number(l.price || 0) * Number(l.qty || 0);
+  }));
+  $('#salesItems').innerHTML = Object.keys(itemTotals).length
+    ? Object.entries(itemTotals).map(([name, v]) => `<div class="saleItem"><span>${esc(name)} × ${v.qty}</span><b>${peso(v.amount)}</b></div>`).join('')
+    : '<div class="sub" style="margin-top:8px">No items sold for this period.</div>';
+
+  $('#salesList').innerHTML = filtered.length ? [...filtered].sort((a,b) => new Date(b.at)-new Date(a.at)).map(s => `
+    <div class="card">
+      <div class="row"><div><b>${peso(s.total)}</b><div class="sub">${new Date(s.at).toLocaleString()}</div></div><button class="btn2 danger" type="button" data-delete-sale="${s.at}">Delete</button></div>
+      <div class="saleLine">${(s.lines || []).map(l => {
+        const name = l.name || (find(l.code) ? find(l.code).name : l.code);
+        return `<div class="saleItem"><span>${esc(name)} × ${l.qty}</span><b>${peso(l.price * l.qty)}</b></div>`;
+      }).join('')}</div>
+    </div>`).join('') : '<div class="empty">No sales found for this period.</div>';
+}
+$('#salesDate').addEventListener('input', renderSales);
+$('#salesMonth').addEventListener('change', renderSales);
+$('#salesToday').addEventListener('click', () => {
+  const d = new Date();
+  $('#salesDate').value = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+  $('#salesMonth').value = '';
+  renderSales();
+});
+$('#salesAll').addEventListener('click', () => { $('#salesDate').value = ''; $('#salesMonth').value = ''; renderSales(); });
+$('#salesList').addEventListener('click', e => {
+  const b = e.target.closest('[data-delete-sale]'); if (!b) return;
+  if (!confirm('Delete this sale record?')) return;
+  sales = sales.filter(s => s.at !== b.dataset.deleteSale);
+  save(); renderSales(); toast('Sale deleted');
+});
+
+
 /* ---------- tabs ---------- */
 document.querySelector('.nav').addEventListener('click', e => {
   const b = e.target.closest('button'); if (!b) return;
   document.querySelectorAll('.nav button').forEach(x => x.classList.toggle('on', x === b));
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('on', t.id === 't-' + b.dataset.tab));
   if (b.dataset.tab !== 'sell') stopCam();
-  renderItems(); renderStock();
+  renderItems(); renderStock(); renderSales();
 });
-
-renderCart(); renderItems(); renderStock();
 
 function openEdit(code) {
   const i = find(code); if (!i) return;
   const f = $('#editItem');
-  f.oldCode.value = i.code;
-  f.name.value = i.name;
-  f.code.value = i.code;
-  f.price.value = i.price;
-  f.stock.value = i.stock;
-  f.min.value = i.min || 10;
+  f.oldCode.value = i.code; f.name.value = i.name; f.code.value = i.code;
+  f.price.value = i.price; f.stock.value = i.stock; f.min.value = i.min || 10;
   $('#editDialog').showModal();
 }
-
 function deleteItem(code) {
   const i = find(code); if (!i) return;
   if (!confirm('Delete "' + i.name + '" from inventory?')) return;
-  items = items.filter(x => x.code !== code);
-  cart = cart.filter(x => x.code !== code);
-  save(); renderCart(); renderItems(); renderFind(); renderStock();
-  toast('Item deleted');
+  items = items.filter(x => x.code !== code); cart = cart.filter(x => x.code !== code);
+  save(); renderCart(); renderItems(); renderFind(); renderStock(); renderSales(); toast('Item deleted');
 }
-
 $('#closeEdit').addEventListener('click', () => $('#editDialog').close());
 $('#editItem').addEventListener('submit', e => {
   e.preventDefault();
-  const f = new FormData(e.target);
-  const oldCode = f.get('oldCode');
-  const i = find(oldCode); if (!i) return;
+  const f = new FormData(e.target), oldCode = f.get('oldCode'), i = find(oldCode); if (!i) return;
   const newCode = (f.get('code') || '').trim() || ('NO-' + Date.now());
   if (newCode !== oldCode && find(newCode)) return toast('That code already exists');
-  i.name = f.get('name').trim();
-  i.code = newCode;
-  i.price = +f.get('price');
-  i.stock = +f.get('stock');
-  i.min = +f.get('min');
+  i.name = f.get('name').trim(); i.code = newCode; i.price = +f.get('price'); i.stock = +f.get('stock'); i.min = +f.get('min');
   cart.forEach(line => { if (line.code === oldCode) line.code = newCode; });
-  save(); $('#editDialog').close(); renderCart(); renderItems(); renderFind(); renderStock();
-  toast('Item updated');
+  save(); $('#editDialog').close(); renderCart(); renderItems(); renderFind(); renderStock(); renderSales(); toast('Item updated');
 });
 $('#itemFilters').addEventListener('click', e => {
   const b = e.target.closest('[data-filter]'); if (!b) return;
@@ -424,121 +523,69 @@ $('#itemFilters').addEventListener('click', e => {
   renderItems();
 });
 
-/* ---------- code scanner dialog ---------- */
-let codeScannerStream = null;
-let codeScannerActive = false;
-let codeScanTarget = 'new';
-let codeNativeDetector = null;
-let codeJsQR = null;
-let codeZxingReader = null;
-
+let codeScannerStream = null, codeScannerActive = false, codeScanTarget = 'new', codeNativeDetector = null, codeJsQR = null, codeZxingReader = null;
 function loadCodeScannerScript(src) {
-  return new Promise(resolve => {
-    if (document.querySelector('script[src="' + src + '"]')) return resolve();
-    const s = document.createElement('script'); s.src = src;
-    s.onload = resolve; s.onerror = resolve; document.head.append(s);
-  });
+  return new Promise(resolve => { const s = document.createElement('script'); s.src = src; s.onload = resolve; s.onerror = resolve; document.head.append(s); });
 }
-
 async function openCodeScanner(target) {
   codeScanTarget = target;
-  const dlg = $('#codeScannerDialog');
-  if (!dlg.open) dlg.showModal();
+  if (!$('#codeScannerDialog').open) $('#codeScannerDialog').showModal();
   $('#codeScannerHint').textContent = 'Starting camera...';
-
   codeNativeDetector = null;
-  if ('BarcodeDetector' in window) {
-    try { codeNativeDetector = new BarcodeDetector(); } catch { codeNativeDetector = null; }
-  }
-
+  if ('BarcodeDetector' in window) { try { codeNativeDetector = new BarcodeDetector(); } catch { codeNativeDetector = null; } }
   if (!codeNativeDetector) {
-    await loadCodeScannerScript('https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js');
-    codeJsQR = window.jsQR || null;
+    await loadCodeScannerScript('https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js'); codeJsQR = window.jsQR || null;
     await loadCodeScannerScript('https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js');
   }
-
   const v = $('#codeScannerVideo');
   if (!codeNativeDetector && window.ZXing && window.ZXing.BrowserMultiFormatReader) {
     try {
       codeZxingReader = new window.ZXing.BrowserMultiFormatReader();
-      await codeZxingReader.decodeFromVideoElement(v, (result) => { if (result) useScannedCode(result.getText()); });
-      $('#codeScannerHint').textContent = 'Hold the barcode or QR inside the frame';
-      codeScannerActive = true;
-      return;
+      await codeZxingReader.decodeFromVideoElement(v, result => { if (result) useScannedCode(result.getText()); });
+      $('#codeScannerHint').textContent = 'Hold the barcode or QR inside the frame'; return;
     } catch { codeZxingReader = null; }
   }
-
-  try {
-    codeScannerStream = await navigator.mediaDevices.getUserMedia({video: {facingMode: {ideal: 'environment'}}, audio: false});
-  } catch {
-    $('#codeScannerHint').textContent = 'Camera blocked. Allow camera access and try again.';
-    toast('Camera permission is required');
-    return;
-  }
+  try { codeScannerStream = await navigator.mediaDevices.getUserMedia({video: {facingMode: {ideal: 'environment'}}, audio: false}); }
+  catch { $('#codeScannerHint').textContent = 'Camera blocked. Allow camera access and try again.'; return; }
   v.srcObject = codeScannerStream; await v.play();
   $('#codeScannerHint').textContent = 'Hold the barcode or QR inside the frame';
-  codeScannerActive = true;
-  codeScannerLoop();
+  codeScannerActive = true; codeScannerLoop();
 }
-
 function stopCodeScanner() {
   codeScannerActive = false;
-  if (codeZxingReader) {
-    try { codeZxingReader.reset(); } catch {}
-    codeZxingReader = null;
-  }
-  if (codeScannerStream) codeScannerStream.getTracks().forEach(t => t.stop());
-  codeScannerStream = null;
-  const v = $('#codeScannerVideo'); v.srcObject = null;
+  if (codeZxingReader) { try { codeZxingReader.reset(); } catch {} codeZxingReader = null; }
+  if (codeScannerStream) codeScannerStream.getTracks().forEach(t => t.stop()); codeScannerStream = null;
+  $('#codeScannerVideo').srcObject = null;
   if ($('#codeScannerDialog').open) $('#codeScannerDialog').close();
 }
-
 function useScannedCode(value) {
   if (!value) return;
-  value = String(value).trim();
   const form = codeScanTarget === 'edit' ? $('#editItem') : $('#newItem');
-  form.elements.code.value = value;
-  if (navigator.vibrate) navigator.vibrate(80);
-  stopCodeScanner();
-  toast('Scanned code: ' + value);
+  form.elements.code.value = String(value).trim();
+  stopCodeScanner(); if (navigator.vibrate) navigator.vibrate(80);
+  toast('Scanned code: ' + form.elements.code.value);
 }
-
 async function codeScannerLoop() {
   if (!codeScannerActive) return;
   const v = $('#codeScannerVideo');
   try {
     let value = '';
-    if (codeNativeDetector) {
-      const results = await codeNativeDetector.detect(v);
-      if (results[0]) value = results[0].rawValue;
-    } else if (codeJsQR && v.videoWidth) {
+    if (codeNativeDetector) { const r = await codeNativeDetector.detect(v); if (r[0]) value = r[0].rawValue; }
+    else if (codeJsQR && v.videoWidth) {
       const c = codeScannerLoop.c || (codeScannerLoop.c = document.createElement('canvas'));
       c.width = v.videoWidth; c.height = v.videoHeight;
-      const ctx = c.getContext('2d', {willReadFrequently: true}); ctx.drawImage(v, 0, 0);
-      const image = ctx.getImageData(0, 0, c.width, c.height);
-      const qr = codeJsQR(image.data, c.width, c.height); if (qr) value = qr.data;
+      const x = c.getContext('2d', {willReadFrequently: true}); x.drawImage(v, 0, 0);
+      const d = x.getImageData(0, 0, c.width, c.height); const q = codeJsQR(d.data, c.width, c.height); if (q) value = q.data;
     }
     if (value) useScannedCode(value);
   } catch {}
   if (codeScannerActive) setTimeout(() => requestAnimationFrame(codeScannerLoop), 180);
 }
-
-document.querySelectorAll('[data-scan-code]').forEach(button => {
-  button.addEventListener('click', () => openCodeScanner(button.dataset.scanCode));
-});
+document.querySelectorAll('[data-scan-code]').forEach(b => b.addEventListener('click', () => openCodeScanner(b.dataset.scanCode)));
 $('#closeCodeScanner').addEventListener('click', stopCodeScanner);
 $('#codeScannerDialog').addEventListener('cancel', e => { e.preventDefault(); stopCodeScanner(); });
 
-/* ---------- tabs ---------- */
-document.querySelector('.nav').addEventListener('click', e => {
-  const b = e.target.closest('button'); if (!b) return;
-  document.querySelectorAll('.nav button').forEach(x => x.classList.toggle('on', x === b));
-  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('on', t.id === 't-' + b.dataset.tab));
-  if (b.dataset.tab !== 'sell') stopCam();
-  renderItems(); renderStock();
-});
-
-renderCart(); renderItems(); renderStock();
+renderCart(); renderItems(); renderStock(); renderSales();
 </script>
 </body>
 </html>
