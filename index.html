@@ -1,0 +1,418 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Smart POS</title>
+<style>
+:root{--bg:#F6F7F5;--ink:#14201B;--mute:#4F5B55;--line:#D9DED9;--g:#0F7B5F;--gd:#0B5E48;--gl:#DDF1EA;--warn:#8A4308;--warnbg:#FDEBD3;--scan:#5FD3B0}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:#E9ECE8;font-family:Inter,system-ui,-apple-system,"Segoe UI",sans-serif;color:var(--ink)}
+button,input{font:inherit;color:inherit}
+.app{max-width:480px;height:100dvh;margin:0 auto;background:var(--bg);display:flex;flex-direction:column;padding-top:env(safe-area-inset-top)}
+.tab{display:none;flex:1;min-height:0;flex-direction:column}
+.tab.on{display:flex}
+.top{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:14px 16px 10px}
+.top h1{margin:0;font-size:22px}
+.sub{color:var(--mute);font-size:12px}
+.row{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:10px 12px}
+.pill{font-size:12px;font-weight:700;padding:4px 10px;border-radius:99px;background:var(--gl);color:var(--gd);white-space:nowrap}
+.pill.low{background:var(--warnbg);color:var(--warn)}
+.btn{min-height:52px;width:100%;border-radius:12px;border:0;background:var(--g);color:#fff;font-weight:700;font-size:17px;cursor:pointer}
+.btn:disabled{opacity:.5}
+.btn2{min-height:44px;border-radius:10px;border:1px solid var(--g);background:#fff;color:var(--gd);font-weight:700;padding:0 14px;cursor:pointer}
+.link{background:none;border:0;color:var(--gd);font-weight:700;font-size:13px;min-height:44px;cursor:pointer}
+.cam{position:relative;margin:0 16px;height:130px;border-radius:16px;background:var(--ink);overflow:hidden;flex:none}
+.cam video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.cam .frame{position:absolute;inset:18px 70px;border:3px solid var(--scan);border-radius:12px}
+.cam .line{position:absolute;left:80px;right:80px;top:50%;height:3px;background:var(--scan)}
+.cam .camBtn{position:absolute;left:50%;bottom:8px;transform:translateX(-50%);background:#fff;border:0;border-radius:99px;padding:0 16px;min-height:36px;font-weight:700;font-size:13px;cursor:pointer}
+.tag{position:absolute;bottom:8px;right:10px;background:var(--g);color:#fff;font-size:12px;font-weight:700;padding:4px 10px;border-radius:99px}
+.lh{padding:6px 16px 0}
+.list{flex:1;min-height:0;overflow:auto;padding:4px 16px;display:flex;flex-direction:column;gap:6px}
+.item{padding:6px 8px 6px 12px}
+.item.new{border-color:var(--g)}
+.item b.n{font-size:15px}
+.qty{display:flex;align-items:center;gap:4px}
+.qty b{min-width:22px;text-align:center}
+.q{width:44px;height:44px;border-radius:10px;border:1px solid #B8C0BA;background:#fff;font-size:18px;font-weight:700;cursor:pointer}
+.empty{color:var(--mute);text-align:center;padding:18px 8px;font-size:14px}
+.pay{margin:6px 16px 0;display:flex;flex-direction:column;gap:8px;flex:none}
+.chips{display:flex;gap:6px}
+.chip{flex:1;min-height:44px;border-radius:10px;border:1px solid #B8C0BA;background:#fff;font-weight:600;font-size:14px;cursor:pointer}
+.chip.on{background:var(--g);border-color:var(--g);color:#fff}
+#paid{width:130px;height:44px;border:2px solid var(--g);border-radius:10px;padding:0 12px;font-weight:700;font-size:18px;text-align:right;background:#fff}
+.chg{display:flex;justify-content:space-between;align-items:center;background:var(--gl);color:var(--gd);border-radius:10px;padding:8px 12px}
+.chg.bad{background:var(--warnbg);color:var(--warn)}
+.chg b:last-child{font-size:26px}
+.pad{padding:10px 16px;flex:none}
+.nav{display:flex;border-top:1px solid var(--line);background:#fff;height:68px;flex:none;padding-bottom:env(safe-area-inset-bottom)}
+.nav button{flex:1;border:0;background:none;font-size:13px;font-weight:600;color:var(--mute);cursor:pointer}
+.nav button.on{color:var(--gd);box-shadow:inset 0 3px var(--g)}
+.in{width:100%;height:48px;border:1px solid #B8C0BA;border-radius:12px;padding:0 14px;background:#fff;font-size:15px}
+.body{flex:1;min-height:0;overflow:auto;padding:0 16px 16px;display:flex;flex-direction:column;gap:8px}
+.stats{display:flex;gap:8px}.stats .card{flex:1}.stats b{font-size:22px}
+details.card summary{font-weight:700;min-height:32px;cursor:pointer}
+details form{display:grid;gap:8px;margin-top:8px}
+dialog{width:min(440px,94vw);border:0;border-radius:16px;padding:14px;max-height:80dvh}
+dialog::backdrop{background:rgba(20,32,27,.5)}
+#toast{position:fixed;left:50%;bottom:90px;transform:translateX(-50%);background:var(--ink);color:#fff;padding:10px 16px;border-radius:12px;font-size:14px;max-width:90vw;opacity:0;pointer-events:none;transition:opacity .2s}
+#toast.show{opacity:1}
+:focus-visible{outline:3px solid #1B6FD6;outline-offset:2px}
+@media (prefers-reduced-motion:reduce){#toast{transition:none}}
+.actions{display:flex;gap:6px;justify-content:flex-end;margin-top:8px}
+.actions .btn2{min-height:38px;padding:0 10px;font-size:13px}
+.actions .danger{border-color:#A33C32;color:#A33C32}
+.filterRow{display:flex;gap:6px}
+.filterRow .chip{min-height:40px}
+</style>
+</head>
+<body>
+<div class="app">
+
+<!-- SELL -->
+<section id="t-sell" class="tab on">
+  <header class="top">
+    <div><h1>New sale</h1><div class="sub" id="hint">Scan items, they add automatically</div></div>
+    <span class="pill" id="count">0 items</span>
+  </header>
+  <div class="cam">
+    <video id="v" playsinline muted></video>
+    <div class="frame"></div><div class="line"></div>
+    <button class="camBtn" id="camBtn">Start camera</button>
+    <div class="tag" id="tag" hidden></div>
+  </div>
+  <div class="row lh"><b style="font-size:14px">Scanned items</b><button class="link" id="openFind">Type name / SKU</button></div>
+  <div class="list" id="list"></div>
+  <div class="card pay">
+    <div class="row"><span style="font-weight:600">Total</span><b style="font-size:26px" id="tot">₱0.00</b></div>
+    <div class="row"><label for="paid" class="sub">Customer pays (custom)</label><input id="paid" inputmode="decimal" placeholder="₱0.00" autocomplete="off"></div>
+    <div class="chips" id="chips">
+      <button class="chip" data-v="20">₱20</button><button class="chip" data-v="50">₱50</button><button class="chip" data-v="100">₱100</button><button class="chip" data-v="500">₱500</button><button class="chip" data-v="1000">₱1k</button>
+    </div>
+    <div class="chg" id="chg"><b id="chgL">Change to give</b><b id="chgV">₱0.00</b></div>
+  </div>
+  <div class="pad"><button class="btn" id="charge">Charge ₱0.00</button></div>
+</section>
+
+<!-- ITEMS -->
+<section id="t-items" class="tab">
+  <header class="top"><div><h1>Items</h1><div class="sub">Search by name or code, tap Add to sell</div></div></header>
+  <div class="body">
+    <input class="in" id="iq" placeholder="Search name or code" aria-label="Search items">
+    <div class="filterRow" id="itemFilters" aria-label="Item code filter">
+      <button class="chip on" type="button" data-filter="all">View all</button>
+      <button class="chip" type="button" data-filter="nocode">No QR/barcode</button>
+      <button class="chip" type="button" data-filter="code">Has code</button>
+    </div>
+    <details class="card"><summary>New item</summary>
+      <form id="newItem">
+        <input class="in" name="name" placeholder="Item name" required>
+        <input class="in" name="code" placeholder="Barcode / QR code (blank for no code)">
+        <input class="in" name="price" type="number" step="0.01" min="0" placeholder="Price" required>
+        <input class="in" name="stock" type="number" min="0" placeholder="Starting stock" required>
+        <button class="btn" type="submit">Save item</button>
+      </form>
+    </details>
+    <div id="ilist" style="display:flex;flex-direction:column;gap:8px"></div>
+  </div>
+</section>
+
+<!-- STOCK -->
+<section id="t-stock" class="tab">
+  <header class="top"><div><h1>Inventory</h1><div class="sub">Stock updates after every sale</div></div></header>
+  <div class="body">
+    <div class="stats"><div class="card"><div class="sub">Items</div><b id="sItems">0</b></div><div class="card"><div class="sub">Low stock</div><b id="sLow" style="color:var(--warn)">0</b></div></div>
+    <div id="slist" style="display:flex;flex-direction:column;gap:8px"></div>
+  </div>
+</section>
+
+<nav class="nav" aria-label="Main">
+  <button data-tab="sell" class="on">Sell</button><button data-tab="items">Items</button><button data-tab="stock">Stock</button>
+</nav>
+</div>
+
+<!-- Manual find -->
+<dialog id="find">
+  <div class="row" style="margin-bottom:10px"><b>Find item</b><button class="link" id="closeFind">Close</button></div>
+  <input class="in" id="fq" placeholder="Type name or code" aria-label="Find item">
+  <div id="fres" style="display:flex;flex-direction:column;gap:8px;margin-top:10px;overflow:auto;max-height:50dvh"></div>
+</dialog>
+
+<!-- Edit item -->
+<dialog id="editDialog">
+  <div class="row" style="margin-bottom:10px"><b>Edit item</b><button class="link" id="closeEdit" type="button">Close</button></div>
+  <form id="editItem" style="display:grid;gap:8px">
+    <input type="hidden" name="oldCode">
+    <input class="in" name="name" placeholder="Item name" required>
+    <input class="in" name="code" placeholder="Barcode / QR code (blank for no code)">
+    <input class="in" name="price" type="number" step="0.01" min="0" placeholder="Price" required>
+    <input class="in" name="stock" type="number" min="0" placeholder="Stock" required>
+    <input class="in" name="min" type="number" min="0" placeholder="Low stock level" required>
+    <button class="btn" type="submit">Save changes</button>
+  </form>
+</dialog>
+
+<div id="toast" role="status"></div>
+
+<script>
+/* ---------- helpers ---------- */
+const $ = s => document.querySelector(s);
+const peso = n => '₱' + Number(n).toLocaleString('en-PH', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const load = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) || d; } catch { return d; } };
+const save = () => { localStorage.setItem('pos_items', JSON.stringify(items)); localStorage.setItem('pos_sales', JSON.stringify(sales)); };
+
+/* ---------- data (saved on this phone) ---------- */
+let items = load('pos_items', [
+  {code:'4800016', name:'Pancit Canton 60g',        price:14, stock:48, min:10},
+  {code:'4800017', name:'Pancit Canton Chilimansi', price:15, stock:6,  min:10},
+  {code:'4800018', name:'Bottled Water 500ml',      price:20, stock:36, min:10},
+  {code:'4800019', name:'Coffee 3-in-1 pack',       price:38, stock:4,  min:10}
+]);
+let sales = load('pos_sales', []);
+let cart = [];          // [{code, qty}] newest first
+let paid = 0;
+let lastTagTimer;
+let itemFilter = 'all';
+
+const find = code => items.find(i => i.code === String(code).trim());
+const total = () => cart.reduce((s, l) => s + find(l.code).price * l.qty, 0);
+const qtyCount = () => cart.reduce((s, l) => s + l.qty, 0);
+
+function toast(msg) {
+  const t = $('#toast'); t.textContent = msg; t.classList.add('show');
+  clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove('show'), 2200);
+}
+
+/* ---------- cart ---------- */
+function add(code) {
+  const it = find(code);
+  if (!it) { toast('Item not found: ' + code); return false; }
+  let line = cart.find(l => l.code === it.code);
+  if ((line ? line.qty : 0) >= it.stock) { toast(it.name + ': no more stock'); return false; }
+  if (line) { line.qty++; cart = [line, ...cart.filter(l => l !== line)]; }
+  else cart.unshift({code: it.code, qty: 1});
+  const tag = $('#tag'); tag.hidden = false; tag.textContent = 'Added: ' + it.name;
+  clearTimeout(lastTagTimer); lastTagTimer = setTimeout(() => tag.hidden = true, 2000);
+  if (navigator.vibrate) navigator.vibrate(60);
+  renderCart();
+  return true;
+}
+function change(code, d) {
+  const line = cart.find(l => l.code === code), it = find(code);
+  line.qty += d;
+  if (line.qty > it.stock) { line.qty = it.stock; toast('Only ' + it.stock + ' in stock'); }
+  if (line.qty <= 0) cart = cart.filter(l => l !== line);
+  renderCart();
+}
+function renderCart() {
+  $('#count').textContent = qtyCount() + (qtyCount() === 1 ? ' item' : ' items');
+  $('#list').innerHTML = cart.length ? cart.map((l, i) => {
+    const it = find(l.code);
+    return `<div class="card row item ${i === 0 ? 'new' : ''}">
+      <div><b class="n">${esc(it.name)}</b><div class="sub">${peso(it.price)} each · ${peso(it.price * l.qty)}</div></div>
+      <div class="qty"><button class="q" data-c="${esc(l.code)}" data-d="-1" aria-label="Less">−</button><b>${l.qty}</b><button class="q" data-c="${esc(l.code)}" data-d="1" aria-label="More">+</button></div>
+    </div>`;
+  }).join('') : '<div class="empty">Point the camera at a barcode or QR code. Items appear here.</div>';
+  updatePay();
+}
+
+/* ---------- payment & change ---------- */
+function updatePay() {
+  const t = total();
+  $('#tot').textContent = peso(t);
+  $('#charge').textContent = 'Charge ' + peso(t);
+  const diff = paid - t, ok = paid >= t && t > 0;
+  $('#chg').classList.toggle('bad', !ok && t > 0);
+  $('#chgL').textContent = ok || t === 0 ? 'Change to give' : 'Still needed';
+  $('#chgV').textContent = peso(t === 0 ? 0 : Math.abs(diff));
+  document.querySelectorAll('.chip').forEach(c => c.classList.toggle('on', +c.dataset.v === paid));
+}
+$('#paid').addEventListener('input', e => { paid = parseFloat(e.target.value.replace(/[^\d.]/g, '')) || 0; updatePay(); });
+$('#chips').addEventListener('click', e => {
+  const c = e.target.closest('.chip'); if (!c) return;
+  paid = +c.dataset.v; $('#paid').value = paid.toFixed(2); updatePay();
+});
+$('#list').addEventListener('click', e => {
+  const b = e.target.closest('.q'); if (b) change(b.dataset.c, +b.dataset.d);
+});
+$('#charge').addEventListener('click', () => {
+  const t = total();
+  if (!cart.length) return toast('Scan an item first');
+  if (paid < t) return toast('Customer pays less than the total');
+  cart.forEach(l => { find(l.code).stock -= l.qty; });
+  sales.push({at: new Date().toISOString(), total: t, paid, lines: cart.map(l => ({...l, price: find(l.code).price}))});
+  save();
+  const ch = paid - t;
+  toast('Sale saved. Change ' + peso(ch));
+  cart = []; paid = 0; $('#paid').value = '';
+  renderCart(); renderItems(); renderStock();
+});
+
+/* ---------- camera scanning (phone camera only) ---------- */
+let stream, scanning = false, lastCode = '', lastAt = 0, detector, jsQR;
+async function startCam() {
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({video: {facingMode: {ideal: 'environment'}}, audio: false});
+  } catch { return toast('Camera blocked. Allow camera access and open this page over https.'); }
+  const v = $('#v'); v.srcObject = stream; await v.play();
+  $('#camBtn').hidden = true; $('#hint').textContent = 'Camera ready · barcode or QR';
+  if ('BarcodeDetector' in window) detector = new BarcodeDetector();
+  else await new Promise(r => { const s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js'; s.onload = () => { jsQR = window.jsQR; r(); }; s.onerror = r; document.head.append(s); });
+  if (!detector && !jsQR) toast('This browser cannot read codes. Use Type name / SKU.');
+  scanning = true; loop();
+}
+function stopCam() {
+  scanning = false;
+  if (stream) stream.getTracks().forEach(t => t.stop());
+  stream = null; $('#v').srcObject = null; $('#camBtn').hidden = false; $('#hint').textContent = 'Scan items, they add automatically';
+}
+async function loop() {
+  if (!scanning) return;
+  const v = $('#v');
+  try {
+    let value = '';
+    if (detector) { const r = await detector.detect(v); if (r[0]) value = r[0].rawValue; }
+    else if (jsQR && v.videoWidth) {
+      const c = loop.c || (loop.c = document.createElement('canvas')); c.width = v.videoWidth; c.height = v.videoHeight;
+      const x = c.getContext('2d', {willReadFrequently: true}); x.drawImage(v, 0, 0);
+      const d = x.getImageData(0, 0, c.width, c.height), q = jsQR(d.data, d.width, d.height); if (q) value = q.data;
+    }
+    const now = Date.now();
+    if (value && (value !== lastCode || now - lastAt > 1800)) { lastCode = value; lastAt = now; add(value); }
+  } catch {}
+  setTimeout(() => requestAnimationFrame(loop), 200);
+}
+$('#camBtn').addEventListener('click', startCam);
+
+/* ---------- manual find (name or code) ---------- */
+const dlg = $('#find');
+function matches(q) {
+  q = q.trim().toLowerCase();
+  return items.filter(i => !q || i.name.toLowerCase().includes(q) || i.code.toLowerCase().includes(q));
+}
+function renderFind() {
+  $('#fres').innerHTML = matches($('#fq').value).map(i => `
+    <div class="card"><div class="row"><div><b>${esc(i.name)}</b><div class="sub">${/^NO-/.test(i.code) ? 'No QR/barcode' : esc(i.code)} · ${i.stock > 0 ? i.stock + ' in stock' : 'Out of stock'}</div></div>
+    <div style="text-align:right"><b>${peso(i.price)}</b><br><button class="btn2" data-add="${esc(i.code)}" ${i.stock < 1 ? 'disabled style="opacity:.5"' : ''}>Add</button></div></div>
+    <div class="actions"><button class="btn2" data-edit="${esc(i.code)}">Edit</button><button class="btn2 danger" data-delete="${esc(i.code)}">Delete</button></div></div>`).join('')
+    || '<div class="empty">No item matches. Add it in Items.</div>';
+}
+$('#openFind').addEventListener('click', () => { $('#fq').value = ''; renderFind(); dlg.showModal(); $('#fq').focus(); });
+$('#closeFind').addEventListener('click', () => dlg.close());
+$('#fq').addEventListener('input', renderFind);
+$('#fq').addEventListener('keydown', e => { if (e.key === 'Enter') { const m = matches(e.target.value); if (m.length === 1 && add(m[0].code)) dlg.close(); } });
+$('#fres').addEventListener('click', e => {
+  const addButton = e.target.closest('[data-add]');
+  const editButton = e.target.closest('[data-edit]');
+  const deleteButton = e.target.closest('[data-delete]');
+  if (addButton) add(addButton.dataset.add);
+  if (editButton) openEdit(editButton.dataset.edit);
+  if (deleteButton) deleteItem(deleteButton.dataset.delete);
+});
+
+/* ---------- items tab ---------- */
+function renderItems() {
+  let filtered = matches($('#iq').value);
+  if (itemFilter === 'nocode') filtered = filtered.filter(i => /^NO-/.test(i.code));
+  if (itemFilter === 'code') filtered = filtered.filter(i => !/^NO-/.test(i.code));
+  $('#ilist').innerHTML = filtered.map(i => `
+    <div class="card"><div class="row"><div><b>${esc(i.name)}</b><div class="sub">${/^NO-/.test(i.code) ? 'No QR/barcode' : 'Code ' + esc(i.code)} · Stock ${i.stock}</div></div>
+    <div style="text-align:right"><b>${peso(i.price)}</b><br><button class="btn2" data-add="${esc(i.code)}" ${i.stock < 1 ? 'disabled style="opacity:.5"' : ''}>Add</button></div></div>
+    <div class="actions"><button class="btn2" data-edit="${esc(i.code)}">Edit</button><button class="btn2 danger" data-delete="${esc(i.code)}">Delete</button></div></div>`).join('')
+    || '<div class="empty">No items match this view.</div>';
+}
+$('#iq').addEventListener('input', renderItems);
+$('#ilist').addEventListener('click', e => {
+  const addButton = e.target.closest('[data-add]');
+  const editButton = e.target.closest('[data-edit]');
+  const deleteButton = e.target.closest('[data-delete]');
+  if (addButton && add(addButton.dataset.add)) toast('Added to sale');
+  if (editButton) openEdit(editButton.dataset.edit);
+  if (deleteButton) deleteItem(deleteButton.dataset.delete);
+});
+$('#newItem').addEventListener('submit', e => {
+  e.preventDefault();
+  const f = new FormData(e.target);
+  const code = (f.get('code') || '').trim() || ('NO-' + Date.now());
+  if (find(code)) return toast('That code already exists');
+  items.push({code, name: f.get('name').trim(), price: +f.get('price'), stock: +f.get('stock'), min: 10});
+  save(); e.target.reset(); renderItems(); renderStock(); toast('Item saved. Code: ' + code);
+});
+
+/* ---------- inventory tab ---------- */
+function renderStock() {
+  $('#sItems').textContent = items.length;
+  $('#sLow').textContent = items.filter(i => i.stock <= i.min).length;
+  $('#slist').innerHTML = [...items].sort((a, b) => a.stock - b.stock).map(i => `
+    <div class="card row"><div><b>${esc(i.name)}</b><div class="sub">Restock at ${i.min}</div></div>
+    <div class="row"><span class="pill ${i.stock <= i.min ? 'low' : ''}">${i.stock <= i.min ? i.stock + ' left' : i.stock + ' in stock'}</span>
+    <button class="btn2" data-stock="${esc(i.code)}" aria-label="Add stock to ${esc(i.name)}">+ Stock</button></div></div>`).join('');
+}
+$('#slist').addEventListener('click', e => {
+  const b = e.target.closest('[data-stock]'); if (!b) return;
+  const n = parseInt(prompt('How many to add?', '10'), 10);
+  if (n > 0) { find(b.dataset.stock).stock += n; save(); renderStock(); renderItems(); toast('Stock updated'); }
+});
+
+/* ---------- tabs ---------- */
+document.querySelector('.nav').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  document.querySelectorAll('.nav button').forEach(x => x.classList.toggle('on', x === b));
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('on', t.id === 't-' + b.dataset.tab));
+  if (b.dataset.tab !== 'sell') stopCam();
+  renderItems(); renderStock();
+});
+
+renderCart(); renderItems(); renderStock();
+
+function openEdit(code) {
+  const i = find(code); if (!i) return;
+  const f = $('#editItem');
+  f.oldCode.value = i.code;
+  f.name.value = i.name;
+  f.code.value = i.code;
+  f.price.value = i.price;
+  f.stock.value = i.stock;
+  f.min.value = i.min || 10;
+  $('#editDialog').showModal();
+}
+
+function deleteItem(code) {
+  const i = find(code); if (!i) return;
+  if (!confirm('Delete "' + i.name + '" from inventory?')) return;
+  items = items.filter(x => x.code !== code);
+  cart = cart.filter(x => x.code !== code);
+  save(); renderCart(); renderItems(); renderFind(); renderStock();
+  toast('Item deleted');
+}
+
+$('#closeEdit').addEventListener('click', () => $('#editDialog').close());
+$('#editItem').addEventListener('submit', e => {
+  e.preventDefault();
+  const f = new FormData(e.target);
+  const oldCode = f.get('oldCode');
+  const i = find(oldCode); if (!i) return;
+  const newCode = (f.get('code') || '').trim() || ('NO-' + Date.now());
+  if (newCode !== oldCode && find(newCode)) return toast('That code already exists');
+  i.name = f.get('name').trim();
+  i.code = newCode;
+  i.price = +f.get('price');
+  i.stock = +f.get('stock');
+  i.min = +f.get('min');
+  cart.forEach(line => { if (line.code === oldCode) line.code = newCode; });
+  save(); $('#editDialog').close(); renderCart(); renderItems(); renderFind(); renderStock();
+  toast('Item updated');
+});
+$('#itemFilters').addEventListener('click', e => {
+  const b = e.target.closest('[data-filter]'); if (!b) return;
+  itemFilter = b.dataset.filter;
+  document.querySelectorAll('#itemFilters .chip').forEach(x => x.classList.toggle('on', x === b));
+  renderItems();
+});
+</script>
+</body>
+</html>
