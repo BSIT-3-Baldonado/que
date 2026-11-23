@@ -66,6 +66,9 @@ dialog::backdrop{background:rgba(20,32,27,.5)}
 .actions .danger{border-color:#A33C32;color:#A33C32}
 .filterRow{display:flex;gap:6px}
 .filterRow .chip{min-height:40px}
+.codeRow{display:flex;gap:8px}.codeRow .in{flex:1}.codeRow .btn2{min-height:48px;white-space:nowrap}
+  .codeScanner{position:relative;width:100%;height:260px;border-radius:12px;background:#14201B;overflow:hidden}
+  .codeScanner video{width:100%;height:100%;object-fit:cover}.codeScanner .scanFrame{position:absolute;left:12%;right:12%;top:28%;bottom:28%;border:3px solid #5FD3B0;border-radius:10px}
 </style>
 </head>
 <body>
@@ -109,7 +112,7 @@ dialog::backdrop{background:rgba(20,32,27,.5)}
     <details class="card"><summary>New item</summary>
       <form id="newItem">
         <input class="in" name="name" placeholder="Item name" required>
-        <input class="in" name="code" placeholder="Barcode / QR code (blank for no code)">
+        <div class="codeRow"><input class="in" name="code" placeholder="Barcode / QR code (blank for no code)"><button class="btn2" type="button" data-scan-code="new">Scan</button></div>
         <input class="in" name="price" type="number" step="0.01" min="0" placeholder="Price" required>
         <input class="in" name="stock" type="number" min="0" placeholder="Starting stock" required>
         <button class="btn" type="submit">Save item</button>
@@ -146,12 +149,19 @@ dialog::backdrop{background:rgba(20,32,27,.5)}
   <form id="editItem" style="display:grid;gap:8px">
     <input type="hidden" name="oldCode">
     <input class="in" name="name" placeholder="Item name" required>
-    <input class="in" name="code" placeholder="Barcode / QR code (blank for no code)">
+    <div class="codeRow"><input class="in" name="code" placeholder="Barcode / QR code (blank for no code)"><button class="btn2" type="button" data-scan-code="edit">Scan</button></div>
     <input class="in" name="price" type="number" step="0.01" min="0" placeholder="Price" required>
     <input class="in" name="stock" type="number" min="0" placeholder="Stock" required>
     <input class="in" name="min" type="number" min="0" placeholder="Low stock level" required>
     <button class="btn" type="submit">Save changes</button>
   </form>
+</dialog>
+
+<!-- Code scanner -->
+<dialog id="codeScannerDialog">
+  <div class="row" style="margin-bottom:10px"><b>Scan barcode / QR</b><button class="link" id="closeCodeScanner" type="button">Cancel</button></div>
+  <div class="codeScanner"><video id="codeScannerVideo" playsinline muted></video><div class="scanFrame"></div></div>
+  <div class="sub" id="codeScannerHint" style="margin-top:8px;text-align:center">Starting camera...</div>
 </dialog>
 
 <div id="toast" role="status"></div>
@@ -413,6 +423,122 @@ $('#itemFilters').addEventListener('click', e => {
   document.querySelectorAll('#itemFilters .chip').forEach(x => x.classList.toggle('on', x === b));
   renderItems();
 });
+
+/* ---------- code scanner dialog ---------- */
+let codeScannerStream = null;
+let codeScannerActive = false;
+let codeScanTarget = 'new';
+let codeNativeDetector = null;
+let codeJsQR = null;
+let codeZxingReader = null;
+
+function loadCodeScannerScript(src) {
+  return new Promise(resolve => {
+    if (document.querySelector('script[src="' + src + '"]')) return resolve();
+    const s = document.createElement('script'); s.src = src;
+    s.onload = resolve; s.onerror = resolve; document.head.append(s);
+  });
+}
+
+async function openCodeScanner(target) {
+  codeScanTarget = target;
+  const dlg = $('#codeScannerDialog');
+  if (!dlg.open) dlg.showModal();
+  $('#codeScannerHint').textContent = 'Starting camera...';
+
+  codeNativeDetector = null;
+  if ('BarcodeDetector' in window) {
+    try { codeNativeDetector = new BarcodeDetector(); } catch { codeNativeDetector = null; }
+  }
+
+  if (!codeNativeDetector) {
+    await loadCodeScannerScript('https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js');
+    codeJsQR = window.jsQR || null;
+    await loadCodeScannerScript('https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js');
+  }
+
+  const v = $('#codeScannerVideo');
+  if (!codeNativeDetector && window.ZXing && window.ZXing.BrowserMultiFormatReader) {
+    try {
+      codeZxingReader = new window.ZXing.BrowserMultiFormatReader();
+      await codeZxingReader.decodeFromVideoElement(v, (result) => { if (result) useScannedCode(result.getText()); });
+      $('#codeScannerHint').textContent = 'Hold the barcode or QR inside the frame';
+      codeScannerActive = true;
+      return;
+    } catch { codeZxingReader = null; }
+  }
+
+  try {
+    codeScannerStream = await navigator.mediaDevices.getUserMedia({video: {facingMode: {ideal: 'environment'}}, audio: false});
+  } catch {
+    $('#codeScannerHint').textContent = 'Camera blocked. Allow camera access and try again.';
+    toast('Camera permission is required');
+    return;
+  }
+  v.srcObject = codeScannerStream; await v.play();
+  $('#codeScannerHint').textContent = 'Hold the barcode or QR inside the frame';
+  codeScannerActive = true;
+  codeScannerLoop();
+}
+
+function stopCodeScanner() {
+  codeScannerActive = false;
+  if (codeZxingReader) {
+    try { codeZxingReader.reset(); } catch {}
+    codeZxingReader = null;
+  }
+  if (codeScannerStream) codeScannerStream.getTracks().forEach(t => t.stop());
+  codeScannerStream = null;
+  const v = $('#codeScannerVideo'); v.srcObject = null;
+  if ($('#codeScannerDialog').open) $('#codeScannerDialog').close();
+}
+
+function useScannedCode(value) {
+  if (!value) return;
+  value = String(value).trim();
+  const form = codeScanTarget === 'edit' ? $('#editItem') : $('#newItem');
+  form.elements.code.value = value;
+  if (navigator.vibrate) navigator.vibrate(80);
+  stopCodeScanner();
+  toast('Scanned code: ' + value);
+}
+
+async function codeScannerLoop() {
+  if (!codeScannerActive) return;
+  const v = $('#codeScannerVideo');
+  try {
+    let value = '';
+    if (codeNativeDetector) {
+      const results = await codeNativeDetector.detect(v);
+      if (results[0]) value = results[0].rawValue;
+    } else if (codeJsQR && v.videoWidth) {
+      const c = codeScannerLoop.c || (codeScannerLoop.c = document.createElement('canvas'));
+      c.width = v.videoWidth; c.height = v.videoHeight;
+      const ctx = c.getContext('2d', {willReadFrequently: true}); ctx.drawImage(v, 0, 0);
+      const image = ctx.getImageData(0, 0, c.width, c.height);
+      const qr = codeJsQR(image.data, c.width, c.height); if (qr) value = qr.data;
+    }
+    if (value) useScannedCode(value);
+  } catch {}
+  if (codeScannerActive) setTimeout(() => requestAnimationFrame(codeScannerLoop), 180);
+}
+
+document.querySelectorAll('[data-scan-code]').forEach(button => {
+  button.addEventListener('click', () => openCodeScanner(button.dataset.scanCode));
+});
+$('#closeCodeScanner').addEventListener('click', stopCodeScanner);
+$('#codeScannerDialog').addEventListener('cancel', e => { e.preventDefault(); stopCodeScanner(); });
+
+/* ---------- tabs ---------- */
+document.querySelector('.nav').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  document.querySelectorAll('.nav button').forEach(x => x.classList.toggle('on', x === b));
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('on', t.id === 't-' + b.dataset.tab));
+  if (b.dataset.tab !== 'sell') stopCam();
+  renderItems(); renderStock();
+});
+
+renderCart(); renderItems(); renderStock();
 </script>
 </body>
 </html>
